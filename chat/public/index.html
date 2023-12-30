@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Чат</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<input type="text" id="username" placeholder="Ваше ім'я користувача">
+<select id="room-select">
+  <option value="room1">Технології програмування</option>
+  <option value="room2">Лекція</option>
+</select>
+<button onclick="setUsername()">Підтвердити</button>
+
+<select id="recipient-select">
+  <option value="">Виберіть користувача</option>
+</select>
+
+<input type="text" id="blockedUser" placeholder="Ім'я користувача для блокування">
+<button onclick="blockUser()">Заблокувати користувача</button>
+<div id="chat" style="display: none;">
+  <div id="user-list">
+    <h3>Користувачі:</h3>
+    <ul></ul>
+  </div>
+  <div id="message-list">
+    <h3>Повідомлення:</h3>
+    <ul></ul>
+  </div>
+  <input type="text" id="message" placeholder="Введіть повідомлення">
+  <button onclick="sendMessage()">Відправити</button>
+  <button onclick="decryptSelectedMessage()">Розшифрувати вибране повідомлення</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/3.1.9-1/crypto-js.js"></script>
+<script src="https://cdn.socket.io/4.3.2/socket.io.min.js"></script>
+<script>
+
+  const socket = io();
+  const blockedUsers = {};
+
+  function setUsername() {
+    const username = document.getElementById('username').value;
+    const room = document.getElementById('room-select').value;
+    socket.emit('new user', { username, room });
+    document.getElementById('username').disabled = true;
+    document.getElementById('room-select').disabled = true;
+    document.getElementById('chat').style.display = 'block';
+  }
+
+  function decryptSelectedMessage() {
+    const selectedMessage = document.querySelector('#message-list ul li:last-child');
+    if (selectedMessage) {
+      const encryptedMessage = selectedMessage.textContent.split(': ')[1];
+      const senderMatch = selectedMessage.textContent.match(/\[Приватно від (.+?)\]/);
+      const sender = senderMatch ? senderMatch[1] : 'Невідомий відправник';
+      const decryptedMessage = CryptoJS.AES.decrypt(encryptedMessage, sender).toString(CryptoJS.enc.Utf8);
+
+      // Створити новий DOM-елемент для розшифрованого повідомлення
+      const decryptedMessageElement = document.createElement('li');
+      decryptedMessageElement.textContent = `[Приватно від ${sender}] (${new Date().toLocaleString()}): ${decryptedMessage}`;
+
+      // Додати розшифроване повідомлення до списку повідомлень
+      const messageList = document.querySelector('#message-list ul');
+      messageList.appendChild(decryptedMessageElement);
+    }
+  }
+
+  function blockUser() {
+    const blockedUsername = document.getElementById('blockedUser').value;
+    blockedUsers[blockedUsername] = true;
+    document.getElementById('blockedUser').value = '';
+  }
+
+  socket.on('user connected', (username) => {
+    const userList = document.querySelector('#user-list ul');
+    const listItem = document.createElement('li');
+    listItem.textContent = username;
+    userList.appendChild(listItem);
+
+    // Оновлюємо вибір користувачів для особистих повідомлень
+    const recipientSelect = document.getElementById('recipient-select');
+    const option = document.createElement('option');
+    option.value = username;
+    option.textContent = username;
+    recipientSelect.appendChild(option);
+  });
+
+  socket.on('user disconnected', (username) => {
+    const userList = document.querySelector('#user-list ul');
+    const items = Array.from(userList.children);
+    const disconnectedUser = items.find(item => item.textContent === username);
+    if (disconnectedUser) {
+      userList.removeChild(disconnectedUser);
+    }
+
+    // Видаляємо користувача з вибору для особистих повідомлень
+    const recipientSelect = document.getElementById('recipient-select');
+    const options = recipientSelect.options;
+    for (let i = 0; i < options.length; i++) {
+      if (options[i].value === username) {
+        recipientSelect.removeChild(options[i]);
+        break;
+      }
+    }
+  });
+
+  socket.on('private message', (data) => {
+    if (blockedUsers[data.sender]) {
+      return;
+    }
+    const messageList = document.querySelector('#message-list ul');
+    // Дешифрування
+    const decryptedMessage = CryptoJS.AES.decrypt(data.message, data.sender).toString(CryptoJS.enc.Utf8);
+    const listItem = document.createElement('li');
+    listItem.textContent = `[Приватно від ${data.sender}] (${data.date}): ${decryptedMessage}`;
+    messageList.appendChild(listItem);
+  });
+
+  function sendMessage() {
+    const message = document.getElementById('message').value;
+    const recipient = document.getElementById('recipient-select').value;
+
+    // Шифрування
+    const encryptedMessage = CryptoJS.AES.encrypt(message, recipient).toString();
+    console.log('Зашифроване повідомлення:', encryptedMessage);
+
+    if (blockedUsers[recipient]) {
+      alert(`Ви заблокували користувача ${recipient}`);
+      return;
+    }
+    socket.emit('send message', { message: encryptedMessage, recipient });
+    document.getElementById('message').value = '';
+    document.getElementById('recipient-select').value = '';
+  }
+
+  function blockUser() {
+    const blockedUsername = document.getElementById('blockedUser').value;
+    blockedUsers[blockedUsername] = true;
+    document.getElementById('blockedUser').value = '';
+  }
+
+  socket.on('new message', (data) => {
+    if (blockedUsers[data.sender]) {
+      return;
+    }
+    const messageList = document.querySelector('#message-list ul');
+    const listItem = document.createElement('li');
+    listItem.textContent = `${data.sender} (${data.date}): ${data.message}`;
+    messageList.appendChild(listItem);
+  });
+
+</script>
+</body>
+</html>
